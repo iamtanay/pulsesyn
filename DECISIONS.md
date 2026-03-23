@@ -1,101 +1,107 @@
-# PulseSyn — Design Decision Log
+## 2026-03-24 — Bias coefficient uses linear verdict score encoding
 
-Every significant design decision made during development is recorded here
-with date, rationale, alternatives considered, and consequences.
-This log is the primary evidence that PulseSyn's design decisions came
-from a human designer over time.
+**Decision:** The bias module maps verdicts to a single numeric axis:
+SUPPORTED=1.0, UNSUPPORTED=0.0, MISLEADING=0.5, INDETERMINATE=0.5.
+Deviation is the absolute difference between the validator's verdict
+score and the population average score on the same axis.
 
----
+**Why:** The spec defines bias_coefficient as
+`|mean_vote_deviation| / max_possible_deviation`. A single linear axis
+is the minimal faithful encoding of the support dimension. MISLEADING and
+INDETERMINATE are placed at the midpoint (0.5) because they represent
+neither strong support nor strong rejection — this is epistemically
+conservative and avoids encoding arbitrary ordering between the two
+non-binary verdicts.
 
-## 2026-03-17 — Go module path set to github.com/iamtanay/pulsesyn
+**Alternatives considered:** Multi-axis encoding (e.g. support × framing
+quality) — deferred. The spec does not specify the axis structure and the
+additional complexity is not justified in Phase 1. Can be revisited with
+empirical data from simulation runs.
 
-**Decision:** Use `github.com/iamtanay/pulsesyn` as the canonical module path.
-
-**Why:** Matches the intended public repository location and follows Go module
-conventions. Consistent with the MIT open protocol release target.
-
-**Alternatives considered:** `baniloo.com/pulsesyn` (custom domain path) —
-deferred until custom domain module proxy is configured.
-
-**Consequences:** All internal imports use this path prefix. Changing it later
-requires a global find-and-replace across the repository.
-
----
-
-## 2026-03-17 — Project scaffold established
-
-**Decision:** Full directory tree created per coding standards v1.0.
-All packages have doc.go files declaring scope and dependency rules.
-
-**Why:** Enforces the core isolation principle from commit one.
-No package can accidentally import across architectural boundaries if the
-boundaries are clear from the start.
-
-**Alternatives considered:** Flat structure with single package — rejected.
-Protocol complexity requires strict separation of concerns.
-
-**Consequences:** All future packages must fit into this structure.
-New top-level packages require a decision log entry explaining why they
-cannot fit into an existing package.
+**Consequences:** Bias detection is currently blind to patterns in
+MISLEADING vs INDETERMINATE voting — a validator who systematically
+flips between these two verdicts will not be detected as biased. This is
+a known limitation documented in the protocol's known limitations section.
 
 ---
 
-## 2026-03-18 — SHA-256 used in Phase 1 instead of SHA3-256
+## 2026-03-24 — Bias Window uses FIFO eviction, not weighted decay
 
-**Decision:** `computeClaimID` uses SHA-256 (stdlib `crypto/sha256`) in Phase 1.
+**Decision:** The sliding window evicts the oldest observation when full
+(FIFO). No recency weighting is applied to observations within the window.
 
-**Why:** The protocol specification calls for SHA3-256 but that requires
-`golang.org/x/crypto`, an external dependency not yet approved for the module.
-The substitution is documented in code comments at the call site.
+**Why:** The spec says "sliding window of last N validations". FIFO is
+the direct implementation of this definition. Recency-weighted decay
+inside the window adds complexity without a spec basis.
 
-**Alternatives considered:** Adding `golang.org/x/crypto` immediately — deferred
-until the full external dependency policy is decided for the module.
+**Alternatives considered:** Exponential recency weighting — rejected
+in Phase 1. If the simulation shows that FIFO windows are too slow to
+detect behaviour changes, weighted decay can be introduced with a spec
+amendment.
 
-**Consequences:** ClaimIDs computed in Phase 1 simulation will differ from those
-computed in production. Migration path must be defined before Phase 2 chain
-integration. This is tracked as a known deviation from the spec.
-
----
-
-## 2026-03-18 — ReputationFloor applies to update and decay operations only
-
-**Decision:** `ReputationFloor` (0.15) is enforced in `ApplyPostFinalizationUpdate`
-and `ApplyDecay` only. The internal `withUpdatedDomainScore` helper clamps to
-`[0.0, ReputationCeiling]`, not `[ReputationFloor, ReputationCeiling]`.
-
-**Why:** `ReputationFloor` protects established validators from losing eligibility
-through decay or a bad run. It is not a starting baseline. A validator with no
-history in a domain has zero reputation there — clamping that to 0.15 on write
-would make every new validator appear eligible without earning it, directly
-contradicting Section 3.3 of the spec.
-
-**Alternatives considered:** Clamping to floor on all writes — rejected. This was
-caught by the test suite and confirmed as a protocol correctness issue, not a
-test-passing convenience.
-
-**Consequences:** Any future operation that modifies domain scores must explicitly
-decide whether to enforce the floor. The default is no — floor enforcement is a
-deliberate protocol policy decision applied only in named protocol operations.
+**Consequences:** A validator who corrects their behaviour will take up
+to MaxWindowSize rounds to fully clear their bias record. The default
+window of 50 means approximately 50 validations to clear a bias flag.
 
 ---
 
-## 2026-03-18 — Late normalization strategy in consensus weight aggregation
+## 2026-03-24 — testify added as the first external dependency
 
-**Decision:** Individual vote weights are not normalized before aggregation.
-Normalization happens at the decision boundary only — majority fraction is
-computed as `winnerMass / TotalMass`, and confidence is a weighted average
-normalized by `weightSum`.
+**Decision:** `github.com/stretchr/testify` v1.9.0 added to go.mod.
 
-**Why:** Late normalization is correct because the majority check is inherently
-a relative comparison. Pre-normalizing individual weights would require knowing
-the total weight in advance, forcing two passes over the votes. The current
-single-pass approach is cleaner and produces identical results.
+**Why:** All Session 1 packages use testify/require and testify/assert.
+The dependency was already present in the test files from Session 1.
+Formalising it in go.mod is required for `go test ./...` to pass.
 
-**Alternatives considered:** Per-vote normalization before aggregation — rejected.
-Cross-session weight comparisons (e.g. 25-validator vs 11-validator claims) never
-happen inside `core/consensus`. Reputation updates operate on verdict outcomes,
-not raw weight values, so the boundary is clean.
+**Alternatives considered:** stdlib `testing` package only — rejected.
+Table-driven tests with require.NoError and assert.Equal are significantly
+more readable than manual if/t.Fatal patterns for protocol-level tests.
 
-**Consequences:** If any future component needs to compare raw weight totals across
-validation sessions of different sizes, a normalization step must be added at that
-boundary. This is not required in any currently planned phase.
+**Consequences:** First external dependency in the module. All future
+test dependencies must follow the same approval process.
+
+---
+
+## 2026-03-24 — Simulation uses uniform random validator selection in Phase 1
+
+**Decision:** The simulation selects validators via uniform random draw
+(rand.Perm) rather than the full composite score algorithm defined in
+spec Section 3.4.
+
+**Why:** The composite score selector is Phase 3 work (pulsesyn/selector).
+The simulation's purpose in Phase 1 is to validate the consensus math and
+reputation convergence properties — uniform selection is sufficient for
+this. The selector package will be exercised in Phase 3 integration tests
+where end-to-end selection behaviour matters.
+
+**Alternatives considered:** Stub composite score selection inside
+simulation — rejected. Stubbing the selection formula inside simulation
+would duplicate logic and diverge from the real implementation. Clean
+separation is preferable.
+
+**Consequences:** Simulation accuracy results may be slightly optimistic
+compared to a reputation-weighted selection because uniform selection
+includes low-reputation validators more often than the real protocol
+would. This is documented in the simulation package's doc.go.
+
+---
+
+## 2026-03-24 — injectDomainReputation uses public API only
+
+**Decision:** The simulation initialises validator reputation scores by
+calling `ApplyPostFinalizationUpdate` repeatedly rather than setting
+scores directly via unexported fields or a testing-only setter.
+
+**Why:** core/ packages are not allowed to export test helpers that
+bypass their own invariants. The simulation is not a test package — it
+is production code and must use only the public API of core/reputation.
+The convergence achieved is sufficient for the simulation's statistical
+purposes.
+
+**Alternatives considered:** Export a `SetDomainScore` function on
+ValidatorRecord — rejected. This would violate the immutability invariant
+and add a mutation path that could be misused outside tests.
+
+**Consequences:** Validator initialisation is approximate (±0.05 of the
+target score). This is acceptable because the simulation measures
+statistical emergent behaviour, not individual validator scores.

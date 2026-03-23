@@ -1,0 +1,128 @@
+# ============================================================
+# PulseSyn Protocol — .gitignore
+# ============================================================
+
+# ------------------------------------------------------------
+# Go
+# ------------------------------------------------------------
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+*.out
+
+# Test artifacts
+*.test
+*.bench
+coverage.out
+coverage.html
+cpu.prof
+mem.prof
+
+# Go workspace (local only)
+go.work
+go.work.sum
+
+# ------------------------------------------------------------
+# Protocol node data
+# ------------------------------------------------------------
+
+# Embedded database files (BadgerDB / bbolt)
+# Never commit live node state
+/data/
+*.db
+*.bolt
+*.badger
+
+# Key material — never committed under any circumstances
+*.pem
+*.key
+*.p12
+*.pfx
+/keys/
+/keystore/
+
+# Chain deployment artifacts with private keys
+/chain/deployments/local/
+/chain/deployments/private/
+
+# ------------------------------------------------------------
+# Smart contracts
+# ------------------------------------------------------------
+
+# Hardhat / Foundry build artifacts
+/chain/artifacts/
+/chain/cache/
+/chain/out/
+/chain/broadcast/
+/chain/typechain-types/
+
+# Foundry — local RPC state
+/chain/.foundry/
+
+# node_modules if using Hardhat
+node_modules/
+
+# ------------------------------------------------------------
+# Simulation output
+# ------------------------------------------------------------
+
+# Simulation run reports (generated, not source)
+/simulation/output/
+/simulation/results/
+*.sim.json
+
+# ------------------------------------------------------------
+# OS and editor noise
+# ------------------------------------------------------------
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# JetBrains (GoLand)
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Vim / Emacs
+*.swp
+*.swo
+*.bak
+[#]*[#]
+.\#*
+
+# ------------------------------------------------------------
+# Environment and secrets
+# ------------------------------------------------------------
+
+.env
+.env.local
+.env.*.local
+*.secret
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+
+*.log
+/logs/
