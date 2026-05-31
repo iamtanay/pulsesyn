@@ -1,5 +1,6 @@
 // Package merkle implements Merkle proof generation and verification for
-// PulseSyn validator vote sets. It proves that a specific set of votes produced
-// a specific verdict without revealing individual votes, producing the
-// merkle_root stored in every ValidationRecord.
+// PulseSyn validator vote sets. A vote set is committed as a Merkle tree root
+// stored in every ValidationRecord, enabling cryptographic inclusion proofs
+// for individual votes without exposing the full set.
+// Dependency rules: stdlib only.
 package merkle
