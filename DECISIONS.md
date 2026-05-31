@@ -122,3 +122,63 @@ This log is the primary evidence that PulseSyn's design decisions came from a hu
 **Alternatives considered:** Export a `SetDomainScore` function — rejected. Violates the immutability invariant and creates a mutation path that could be misused.
 
 **Consequences:** Validator initialisation is approximate (±0.05 of target). Acceptable — simulation measures statistical behaviour, not individual scores.
+
+---
+
+## 2026-05-31 — BadgerDB v4 chosen as embedded database for store/
+
+**Decision:** Use `github.com/dgraph-io/badger/v4` as the embedded key-value store.
+
+**Why:** PulseSyn's write pattern — multiple records written atomically per finalized validation (ValidationRecord + N reputation updates + N bias observations) — favours an LSM-tree over a B-tree. BadgerDB's native prefix-scan iterators align with the multi-index query pattern (by domain, epoch, validator). Concurrent read/write support prepares for multi-threaded session processing in Phase 3.
+
+**Alternatives considered:** bbolt (etcd/bbolt) — B-tree, single-writer, lighter. Rejected because its write lock would serialise all session finalization writes, and its cursor-based prefix scan is more ceremony for the same result.
+
+**Consequences:** Any long-running node process must call `store.RunGC()` on a periodic schedule to prevent unbounded growth of the BadgerDB value log. Not required in tests.
+
+---
+
+## 2026-05-31 — store/ methods do not accept context.Context in Phase 2
+
+**Decision:** All Store methods use no `context.Context` parameter.
+
+**Why:** BadgerDB transactions do not respect context cancellation natively. Accepting ctx with no cancellation behaviour is misleading. Phase 2 runs without a network layer — there is no cancellation scenario.
+
+**Alternatives considered:** Adding `ctx context.Context` as first parameter for API compatibility — rejected. Coding standards prohibit adding features beyond what the task requires. Context will be added when `session/` is built and the first real cancellation path exists.
+
+**Consequences:** All `store/` method signatures will require a mechanical first-parameter update when `session/` integration happens in Phase 3.
+
+---
+
+## 2026-05-31 — encoding/json for store/ serialization in Phase 2
+
+**Decision:** All values are serialized to BadgerDB using `encoding/json`.
+
+**Why:** stdlib-only, human-readable, debuggable with any tool. Sufficient for Phase 2 throughput requirements.
+
+**Alternatives considered:** Protocol Buffers — requires external dependency and schema file. encoding/gob — binary, not cross-language. Both deferred until profiling shows JSON is a bottleneck.
+
+**Consequences:** All stored types carry JSON struct tags. Float64 precision is bounded by JSON representation; acceptable for reputation scores and confidence values in [0.0, 1.0].
+
+---
+
+## 2026-05-31 — merkle/ uses domain-separated SHA-256 hashing
+
+**Decision:** Leaf nodes: `SHA256(0x00 || data)`. Internal nodes: `SHA256(0x01 || left || right)`.
+
+**Why:** Domain separation prevents second-preimage attacks where an attacker presents a valid internal-node hash as a forged leaf inclusion proof. Standard hardened Merkle tree construction.
+
+**Alternatives considered:** No prefix (naive `SHA256(data)`) — rejected, vulnerable to second-preimage attacks. SHA3-256 — deferred, same reason as core/claim (golang.org/x/crypto not yet approved).
+
+**Consequences:** Any external verifier must apply the same domain separation. The `merkle.HashLeaf` function is the canonical reference.
+
+---
+
+## 2026-05-31 — chain/ Ethereum adapter implementation deferred to Phase 2.5
+
+**Decision:** `chain/` defines the `Adapter` interface, all on-chain record types, the Solidity contracts, and a `NullAdapter` for development use. The concrete `EthereumAdapter` is deferred.
+
+**Why:** Implementing `EthereumAdapter` requires: Foundry or Hardhat toolchain, `go-ethereum` dependency (large), `abigen` to generate Go bindings from Solidity ABI, and a deployed or forked chain. This is a separate toolchain setup session, not a coding task.
+
+**Alternatives considered:** Writing `EthereumAdapter` with go-ethereum stubs — rejected. Adapter correctness cannot be verified without a real or simulated chain; untested stub code is worse than no code.
+
+**Consequences:** All higher layers (`session/`, `api/`) must program against the `Adapter` interface, not a concrete type. The `NullAdapter` is the default until chain integration is complete.
